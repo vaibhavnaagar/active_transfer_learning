@@ -3,6 +3,7 @@ import pickle
 from itertools import combinations
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import accuracy_score
+from sklearn.metrics.pairwise import euclidean_distances
 import cvxopt
 
 # import custom classifiers #
@@ -73,11 +74,23 @@ def heatKernelSimilarity(feature_vecs, sigma=None):
     idx1 = list(range(feature_vecs[0].shape[0]))
     idx2 = list(range(idx1[-1] + 1, idx1[-1] + 1 + feature_vecs[1].shape[0]))
     fv = np.vstack(feature_vecs)
-    fvs = fv.reshape(fv.shape[0], 1, fv.shape[1])
-    sq_euclidean_dist = np.einsum('ijk, ijk->ij', fv-fvs, fv-fvs)
+    # try:
+    #     Memory inefficient method
+    #     fvs = fv.reshape(fv.shape[0], 1, fv.shape[1])
+    #     sq_euclidean_dist = np.einsum('ijk, ijk->ij', fv-fvs, fv-fvs)
+    # except MemoryError:
+    sq_euclidean_dist = euclidean_distances(fv, fv, squared=True)
     sigma = np.average(np.sqrt(sq_euclidean_dist)) if sigma is None else sigma
     hks = np.exp(-sq_euclidean_dist/(sigma**2))
-    return hks[np.ix_(idx1, idx1)], hks[np.ix_(idx1, idx2)], hks[np.ix_(idx2, idx1)], hks[np.ix_(idx2, idx2)]
+    return hks[np.ix_(idx1, idx1)], hks[np.ix_(idx1, idx2)], hks[np.ix_(idx2, idx1)], hks[np.ix_(idx2, idx2)], sigma
+
+def heatKernelSimilarity_v2(V1, V2, sigma=None):
+    """
+    """
+    sq_euclidean_dist = euclidean_distances(V1, V2, squared=True)
+    sigma = sigma if sigma else np.average(np.sqrt(sq_euclidean_dist))
+    hks = np.exp(-sq_euclidean_dist/(sigma**2))
+    return hks
 
 def normalize(*matrices, method="l1", return_split=False):
     """ Row-wise normalization, assumes number of rows in all matrices are same
@@ -128,12 +141,24 @@ for i, target_classes in enumerate(combinations(classes, num_target_classes)):
     source_classifiers = get_classifiers(*D_s, source_classes, ncpu=ncpu, random_state=i)
     eval_classifier(source_classifiers, _[0], _[1], classes=source_classes)
     # source_classifier = get_ovr_classifier(*D_s, random_state=i, ncpu=ncpu)
+
+    H_ss, H_st, H_ts, H_tt, sigma = heatKernelSimilarity([D_s[0], L_p[0]])
+    print("HeatKernelSimilarity:", H_ss.shape, H_st.shape, H_ts.shape, H_tt.shape)
+    K_uu = heatKernelSimilarity_v2(U_p[0], U_p[0], sigma=sigma)
+    print("Unlabeld HeatKernelSimilarity:", K_uu.shape)
+    transferred_samples = None
+
     print("Let's begin!")
     for it in range(max_iterations):
-        # BUG: sigma will change at each iteration
         print("#", it)
-        H_ss, H_st, H_ts, H_tt = heatKernelSimilarity([D_s[0], L_p[0]])
-        print("HeatKernelSimilarity:", H_ss.shape, H_st.shape, H_ts.shape, H_tt.shape)
+        # Update Heat Kernel similarity matrix #
+        if transferred_samples:
+            H_st = np.hstack((H_st, heatKernelSimilarity_v2(D_s[0], transferred_samples, sigma=sigma)))
+            H_ts = H_st.T.copy()        # XXX: Not really required
+            H_tts = heatKernelSimilarity_v2(L_p[0], transferred_samples, sigma=sigma)
+            H_tt = np.hstack((H_tt, H_tts[:-transferred_samples.shape[0]]))
+            H_tt = np.vstack((H_tt, H_tts.T))
+            print("HeatKernelSimilarity Updated:", H_ss.shape, H_st.shape, H_ts.shape, H_tt.shape)
         target_indexes = np.arange(L_p[0].shape[0])
         source_indexes = np.arange(D_s[0].shape[0])
 
@@ -152,7 +177,7 @@ for i, target_classes in enumerate(combinations(classes, num_target_classes)):
         print(H_ss_.shape, H_st_.shape)
 
         H_ts_ = H_ts[np.ix_(target_indexes, src_random_samples_idxs)]
-        H_tt_ = H_tt                                                # REVIEW: For now passing as a pointer
+        H_tt_ = H_tt.copy()
         Y_tc = np.zeros((L_p[0].shape[0], num_target_classes))      # One hot encoding
         for col, c in enumerate(target_classes):
             Y_tc[L_p[1]==c, col] = 1
@@ -166,7 +191,7 @@ for i, target_classes in enumerate(combinations(classes, num_target_classes)):
         print(HH.shape)
 
         H_xs = H_ss[np.ix_(source_indexes, src_random_samples_idxs)]
-        H_xt = H_st                                                 # REVIEW: For now passing as a pointer
+        H_xt = H_st.copy()
         H_xs, H_xt = normalize(H_xs, H_xt, method="l1", return_split=True)
         print(H_xs.shape, H_xt.shape)
         src_sim_tgt_s = np.hstack((H_xs, H_xt)) @ HH
@@ -207,8 +232,7 @@ for i, target_classes in enumerate(combinations(classes, num_target_classes)):
         print(E_u.shape)
 
         src_rs_idxs = np.random.choice(D_s[0].shape[0], n_random_samples2, replace=False)
-        K_uu, K_us, _, __ = heatKernelSimilarity([U_p[0], D_s[0][src_rs_idxs]])
-        del _, __
+        K_us = heatKernelSimilarity_v2(U_p[0], D_s[0][src_rs_idxs], sigma=sigma)
         print("HeatKernelSimilarity of unlabeled data:", K_uu.shape, K_us.shape)
 
         print("Ranking score of unlabeled samples by solving the convex optimization problem")
@@ -227,9 +251,11 @@ for i, target_classes in enumerate(combinations(classes, num_target_classes)):
         # Expert Labeling #
         u_idx = np.argpartition(R_p, -n_expert_samples)[-n_expert_samples:]
         print("Now let's see the ranking of top %d unlabeled samples:" % n_expert_samples, R_p[u_idx])
+        transferred_samples = U_p[0][u_idx].copy()
         L_p[0] = np.vstack((L_p[0], U_p[0][u_idx]))
         L_p[1] = np.vstack((L_p[1].reshape(-1,1), U_p[1][u_idx].reshape(-1,1))).reshape(-1)
         U_p[0], U_p[1] = np.delete(U_p[0], u_idx, axis=0), np.delete(U_p[1], u_idx, axis=0)
+        K_uu = np.delete(np.delete(K_uu, u_idx, axis=0), u_idx, axis=1)
         print("Updated labeled and unlabeled data:")
         print(L_p[0].shape, L_p[1].shape, U_p[0].shape, U_p[1].shape)
         print("Iteration #%d completed!" % it)
