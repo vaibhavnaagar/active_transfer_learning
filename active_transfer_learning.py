@@ -159,7 +159,7 @@ for i, target_classes in enumerate(combinations(classes, num_target_classes)):
     print("Splitting data based on labels")
     D_p, D_s = LabelBasedDataSplit(train_data, train_labels, target_classes)
     D_t, _ = LabelBasedDataSplit(test_data, test_labels, target_classes)
-    target_data = (np.vstack((D_p[0], D_t[0])), np.vstack((D_p[1].reshape(-1,1), D_t[1].reshape(-1,1))))
+    target_data = (np.vstack((D_p[0], D_t[0])), np.vstack((D_p[1].reshape(-1,1), D_t[1].reshape(-1,1))).reshape(-1))
     # Splitting target data equally into train and test #
     D_p, D_t = DataSplit(target_data, ratio=0.5, random_state=i)
     print(D_p[0].shape, D_p[1].shape, D_s[0].shape, D_s[1].shape, D_t[0].shape, D_t[1].shape)
