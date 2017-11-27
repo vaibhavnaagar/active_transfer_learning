@@ -10,12 +10,12 @@ python pretrained_model.py --dataset <dataset_name> --model <model_name> --cuda 
 ```
   Use `-h` option for more help.
 
-* `class_similarity.py`: Compute similarity between classes using Word2Vec model trained on **GoogleNews-vectors**. Requires [`GoogleNews-vectors-negative300.bin`](https://github.com/mmihaltz/word2vec-GoogleNews-vectors) in the same directory and specify classes inside the code
+* `class_similarity.py`: Compute similarity between classes using Word2Vec model trained on **GoogleNews-vectors** and store in a **_pickle_** file. Requires [`GoogleNews-vectors-negative300.bin`](https://github.com/mmihaltz/word2vec-GoogleNews-vectors) in the same directory and specify classes inside the code
 ```shell
 python compute_similarity.py
 ```
 
-* `active_transfer_learning_parallel.py`: Run the Active Transfer Learning algorithm parallely on specified number of CPU cores. Set hyper-paramters manually in the code. Generate plots inside the `plots` folder with name as `<dset>_<model_name>_atl.jpeg`.
+* `active_transfer_learning_parallel.py`: Run the Active Transfer Learning algorithm parallely on specified number of CPU cores. Set hyper-paramters manually in the code. Generate plots inside the `plots` folder with name as `<dset>_<model_name>_atl.jpeg`. Requires dataset file (feature vectors in **pickle** file) and class similarity matrix.  
 ```
 python active_transfer_learning_parallel.py
           -d, --dset <Path to dataset> (required)
