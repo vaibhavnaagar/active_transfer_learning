@@ -93,6 +93,8 @@ def run_model(net, loader):
 
 train_embeddings, train_labels = run_model(net, trainloader)
 test_embeddings, test_labels = run_model(net, testloader)
+train_embeddings = train_embeddings.squeeze()
+test_embeddings = test_embeddings.squeeze()
 embeddings = dict(train_features=train_embeddings, train_labels=train_labels,
                   test_features=test_embeddings, test_labels=test_labels)
 print(train_embeddings.shape, train_labels.shape)
